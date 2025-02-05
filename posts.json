@@ -1,7 +1,12 @@
 [
   {
+    "num": 2,
+    "title": "测试文章",
+    "url": "https://wyz.im/posts/2-测试文章"
+  },
+  {
     "num": 1,
-    "title": "配新电脑",
-    "url": "https://www.wyz.im/posts/1-配新电脑"
+    "title": "电脑软件",
+    "url": "https://wyz.im/posts/1-电脑软件"
   }
 ]
