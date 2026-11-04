@@ -1,2 +1,3 @@
+* [第 3 期 - Cloudflare部署EdgeEver](https://wyz.im/posts/3-Cloudflare部署EdgeEver) - 2026-11-04
 * [第 2 期 - 馒头尿闭](https://wyz.im/posts/2-馒头尿闭) - 2026-11-02
 * [第 1 期 - 电脑软件](https://wyz.im/posts/1-电脑软件) - 2026-11-02

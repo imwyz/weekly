@@ -1,0 +1,115 @@
+---
+date: 2026/11/04
+---
+
+<small>不用租服务器，也能把 EdgeEver 部署成自己的在线知识库。这篇记录我用 Cloudflare Workers、D1 和 R2 部署，并绑定自定义域名的完整过程。</small>
+
+# 不租服务器，把 EdgeEver 部署到 Cloudflare
+
+最近我把开源知识库 EdgeEver 部署到了 Cloudflare。整个过程不需要购买 VPS，也不用自己维护 Linux 服务器：Worker 负责运行应用，D1 保存笔记数据，R2 存放图片和附件。部署完成后，还可以继续绑定自己的域名。
+
+先说结果：如果你跟着官方流程走，最重要的是**资源名称要匹配、先设置管理员密码、再连接代码仓库，并给部署令牌开通 D1 权限**。顺序错了，初次构建很容易失败。
+
+项目地址：[tianma-if/edgeever](https://github.com/tianma-if/edgeever)
+
+## 需要准备什么
+
+- 一个 GitHub 账号，用来 Fork 项目并触发后续更新。
+- 一个 Cloudflare 账号，并把准备使用的域名添加到 Cloudflare。
+- 一个密码管理器，用来保存管理员密码和 Cloudflare API Token。
+
+Cloudflare 的 R2 首次启用可能会要求完成订阅开通流程或添加付款方式。操作前请先确认账户页面显示的条款和可能产生的费用；不要把密码或 API Token 放进代码仓库。
+
+## 1. Fork EdgeEver
+
+打开 [EdgeEver 仓库](https://github.com/tianma-if/edgeever)，点击右上角 **Fork**，将仓库复制到自己的 GitHub 账号下。后面的 Cloudflare 构建会连接这个 Fork。
+
+## 2. 在 Cloudflare 创建 D1 和 R2
+
+进入 Cloudflare 控制台，在 **Storage & databases** 中分别创建：
+
+- D1 数据库：名称填写 `edgeever`
+- R2 bucket：名称填写 `edgeever-resources`
+
+名称请按官方默认值填写。Worker 的配置会查找这些资源；如果使用自定义名称，还需要额外配置对应的构建变量。
+
+## 3. 创建 Worker 并先设置管理员密码
+
+进入 **Workers & Pages → Create application → Start with Hello World!**，创建名为 `edgeever` 的 Worker 并完成首次部署。此时它还是示例页面，EdgeEver 要等后续构建完成才会部署上去。
+
+打开 Worker 的 **Settings → Variables and Secrets**，新增一个运行时 Secret：
+
+| 类型 | 名称 | 值 |
+| --- | --- | --- |
+| Secret | `EDGE_EVER_AUTH_PASSWORD` | 自己生成的强密码，建议至少 32 个字符 |
+
+保存并部署 Secret 后再继续。默认登录用户名是 `admin`。如果想换用户名，需要在首次构建前设置构建变量 `EDGE_EVER_AUTH_USERNAME`。
+
+这里要区分两种配置：管理员密码是 Worker 的**运行时 Secret**；`EDGE_EVER_AUTH_USERNAME` 这类是 **Workers Builds 构建变量**。密码只在 Cloudflare 控制台输入，不要提交到 GitHub。
+
+## 4. 把 Fork 连接到 Worker
+
+在 Worker 中打开 **Settings → Builds → Connect**，授权 Cloudflare 访问刚才的 Fork，并选择 `main` 分支。构建配置通常使用：
+
+- Production branch：`main`
+- Root directory：留空
+- Deploy command：保留 `npx wrangler deploy`
+
+Worker 名称需要与项目里的配置一致，即 `edgeever`。通常不需要自己修改 `wrangler.toml`，也不要在控制台重复创建同名绑定。
+
+## 5. 配置 Cloudflare 构建用的 API Token
+
+在 Worker 的 **Settings → Builds → API token** 中选择或创建部署用 Token。该 Token 需要有目标 Cloudflare 账号下的 **D1 Read 和 D1 Edit** 权限，同时保留部署所需的其他权限。
+
+如果 Cloudflare 自动生成的 Token 没有 D1 权限，需要去 **My Profile → API Tokens** 编辑权限，再回到 Worker 的 Builds 设置中选用它。Token 属于敏感凭据，不要贴到文章、截图或仓库里。
+
+## 6. 运行首次部署
+
+打开自己 Fork 的 GitHub 仓库，进入 **Actions → Update deployed EdgeEver**。如果 GitHub 提示启用该 workflow，先启用它；然后选择 `main` 并点击 **Run workflow**。
+
+回到 Cloudflare 的 Worker **Deployments** 查看构建结果。首次部署会执行数据库迁移并发布 Worker，等到构建成功、部署完成后再测试。
+
+## 7. 验证站点和登录
+
+Cloudflare 会提供一个 `workers.dev` 地址。先访问健康检查接口：
+
+```text
+https://你的-worker地址/api/health
+```
+
+正常时应返回 HTTP 200，响应内容类似：
+
+```json
+{"ok":true}
+```
+
+然后打开站点，用用户名 `admin`（或你预先配置的用户名）和 `EDGE_EVER_AUTH_PASSWORD` 登录。确认笔记可以正常创建后，再开始导入自己的资料。
+
+## 8. 绑定自定义域名
+
+在 Worker 的 **Settings → Domains & Routes → Add Domain** 中添加已经托管在当前 Cloudflare 账号下的域名，例如 `notes.example.com`。使用 Workers 的 Custom Domain 时，Cloudflare 会创建所需 DNS 记录并管理边缘证书；一般不需要手工填写一个指向服务器的 IP。
+
+添加后先等域名和证书状态生效，再访问 `https://notes.example.com`。如果 HTTP 能打开、HTTPS 出现 `ERR_SSL_VERSION_OR_CIPHER_MISMATCH`，检查对应 Zone 的 **SSL/TLS → Edge Certificates**：
+
+- 确认 Universal SSL 证书状态为 **Active**。
+- 确认自定义域名的 DNS/Worker 记录由 Cloudflare 代理。
+- 新增域名时证书签发可能需要时间；在证书尚未 Active 前，浏览器可能无法建立 HTTPS 连接。
+- 多级子域名（例如 `a.b.example.com`）可能不在免费 Universal 证书默认覆盖范围内，需要为该主机名配置适用的证书。
+
+我这次遇到的就是刚绑定域名后 HTTPS 握手失败。检查后发现 Worker 域名和 DNS 记录都已就绪，最终等证书生效后，HTTPS 就能正常打开。遇到类似情况先看 Edge Certificates 的状态，不要急着反复改 DNS。
+
+## 常见问题
+
+**构建失败，提示找不到 D1 或权限不足**：检查数据库是否叫 `edgeever`，并确认 Workers Builds 使用的 API Token 有目标账号的 D1 Read/Edit 权限。
+
+**部署后仍是 Hello World**：创建 Worker 只是准备运行环境，不代表 EdgeEver 已经发布。需要完成 GitHub Actions 中的 **Update deployed EdgeEver** 工作流，并确认 Cloudflare 部署成功。
+
+**管理员密码无效**：确认 `EDGE_EVER_AUTH_PASSWORD` 是加在连接 Fork 的那个 Worker 上的运行时 Secret，而不是 GitHub Actions 或 Builds 的普通变量；更新 Secret 后需要部署生效。
+
+**自定义域名 HTTPS 报错**：先看证书是否 Active，再检查 DNS 记录是否指向该 Worker 且为 Proxied。不要把“HTTP 能访问”当成证书已经签发的依据。
+
+## 后续更新和备份
+
+EdgeEver 的 Fork 提供 **Update deployed EdgeEver** 工作流，可用于跟进上游稳定版。更新后到 Cloudflare 确认对应构建完成。使用中也建议定期从 EdgeEver 的个人中心执行数据导出，并把备份保存到自己的安全位置。
+
+这套部署最省心的地方，是不用维护服务器；需要自己负责的，则是账号凭据安全和数据备份。把这两件事做好，就可以安心把它当成自己的长期知识库来用了。
